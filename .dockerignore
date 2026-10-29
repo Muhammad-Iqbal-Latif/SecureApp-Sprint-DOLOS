@@ -1,0 +1,10 @@
+.git
+.github
+.venv
+instance
+evidence
+labs
+native/*
+!native/secure.c
+__pycache__
+*.pyc

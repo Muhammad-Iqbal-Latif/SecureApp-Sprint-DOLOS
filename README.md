@@ -6,6 +6,9 @@ DOLOS is a controlled defensive cybersecurity app: simulated honeypot login, inc
 
 **Instructor status:** custom project theme requires approval and confirmation of uniqueness. **Academic note:** AI-assisted code permitted under exam instructions, but team must understand and justify all security decisions and cite any third-party references.
 
+## Native parser integration
+The live event-ingestion path now uses the bounds-checked native C event-tag validator via `dolos/native.py` and `dolos/db.py`. Build it with `make native-library` before starting directly with `python3 run.py`, or use `make run` (which builds it automatically). `make test` also builds the shared library before executing all 12 tests. Oversized, embedded-NUL, and malformed event tags are rejected before SQLite insertion. The vulnerable C example remains isolated and is never included in the Docker image. This is a controlled local application, not an internet-facing honeypot.
+
 ## Fedora Quick Start (first terminal)
 ```bash
 sudo dnf install -y git gh python3 gcc make curl jq
