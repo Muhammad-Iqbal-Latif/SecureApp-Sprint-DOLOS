@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+instance/
+evidence/*.json
+evidence/*.html
+evidence/*.txt
+evidence/*.png
+evidence/*.webm
+!evidence/README.md
+.DS_Store
+.coverage
+*.o
+native/vulnerable
+native/secure
