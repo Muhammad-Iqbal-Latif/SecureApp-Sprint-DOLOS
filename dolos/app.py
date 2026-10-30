@@ -1,5 +1,7 @@
 """DOLOS local-first, defensive honeypot simulator and incident dashboard."""
 import json
+import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -11,7 +13,7 @@ from wsgiref.simple_server import make_server, WSGIRequestHandler
 from . import db as model
 from .native import validate_event_tag
 from .security import verify_password, new_token, token_hash, esc
-from .ui import layout
+from .ui import layout, CSS_SHA256
 
 MAX_BODY = 4096
 MAX_FIELD = 96
@@ -24,6 +26,7 @@ def flatten(value):
 class DolosApp:
     def __init__(self, database=None, secure_cookie=None):
         validate_event_tag('decoy-login')  # Fail closed at startup if C guard is unavailable.
+        self._prelogin_key = secrets.token_bytes(32)  # For this single-process local service.
         self.path = str(database or os.getenv('DOLOS_DB', 'instance/dolos.sqlite3'))
         self.secure_cookie = (os.getenv('DOLOS_COOKIE_SECURE', '0') == '1') if secure_cookie is None else secure_cookie
         with model.connect(self.path) as con:
@@ -40,7 +43,7 @@ class DolosApp:
             ('Content-Length', str(len(body))),
             ('X-Content-Type-Options', 'nosniff'),
             ('X-Frame-Options', 'DENY'),
-            ('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"),
+            ('Content-Security-Policy', f"default-src 'none'; style-src 'sha256-{CSS_SHA256}'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"),
             ('Referrer-Policy', 'no-referrer'),
             ('Cache-Control', 'no-store'),
         ]
@@ -72,8 +75,10 @@ class DolosApp:
             if route == '/trap/login' and method == 'GET':
                 return self.page('Decoy service', '<h1>Legacy service</h1><form method="post"><label>Username <input name="username" maxlength="96"></label><button>Connect</button></form>')
             if route == '/login' and method == 'GET':
-                return self.page('Sign in', '<h1>Analyst sign in</h1><div class="panel"><form method="post"><label>Username <input name="username" required></label><label>Password <input type="password" name="password" required></label><button>Sign in</button></form></div>')
+                return self.login_page()
             if route == '/login' and method == 'POST':
+                if not self.valid_prelogin_csrf(env, data):
+                    return self.reply(403, 'CSRF validation failed')
                 return self.login(con, data)
             if route == '/' and method == 'GET':
                 if not user:
@@ -130,6 +135,45 @@ class DolosApp:
             model.create_event(con, decoy['owner_id'], decoy['id'], 'decoy-login', username,
                                env.get('REMOTE_ADDR', 'unknown')[:48])
         return self.reply(401, 'Decoy service: authentication unavailable')
+
+    def login_page(self):
+        # Short-lived, signed pre-auth token prevents forged analyst logins.
+        expiry = int(time.time()) + 600
+        nonce = secrets.token_urlsafe(24)
+        cookie_value = f'{expiry}.{nonce}'
+        tag = hmac.new(self._prelogin_key, cookie_value.encode('ascii'), hashlib.sha256).hexdigest()
+        body = ('<h1>Analyst sign in</h1><div class="panel"><form method="post">'
+                f'<input type="hidden" name="csrf" value="{tag}">'
+                '<label>Username <input name="username" required></label>'
+                '<label>Password <input type="password" name="password" required></label>'
+                '<button>Sign in</button></form></div>')
+        status, headers, response = self.page('Sign in', body)
+        secure = 'Secure; ' if self.secure_cookie else ''
+        headers.append(('Set-Cookie',
+            f'dolos_prelogin={cookie_value}; Path=/login; {secure}HttpOnly; SameSite=Strict; Max-Age=600'))
+        return status, headers, response
+
+    def valid_prelogin_csrf(self, env, data):
+        cookies = SimpleCookie()
+        try:
+            cookies.load(env.get('HTTP_COOKIE', ''))
+            if 'dolos_prelogin' not in cookies:
+                return False
+            value = cookies['dolos_prelogin'].value
+            if len(value) > 100:
+                return False
+            timestamp, sep, nonce = value.partition('.')
+            if not sep or len(nonce) < 20 or not timestamp.isdigit():
+                return False
+            now = int(time.time())
+            expiry = int(timestamp)
+            if not now <= expiry <= now + 600:
+                return False
+            expected = hmac.new(self._prelogin_key, value.encode('ascii'), hashlib.sha256).hexdigest()
+            submitted = str(data.get('csrf', ''))
+            return len(submitted) == len(expected) and hmac.compare_digest(submitted, expected)
+        except (ValueError, UnicodeEncodeError):
+            return False
 
     def login(self, con, data):
         username = str(data.get('username', ''))[:MAX_FIELD]
