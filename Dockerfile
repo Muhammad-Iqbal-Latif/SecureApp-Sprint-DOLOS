@@ -5,6 +5,12 @@ COPY native/secure.c .
 RUN gcc -O2 -fPIC -shared -Wall -Wextra -Werror -fstack-protector-strong -D_FORTIFY_SOURCE=2 -DDOLOS_LIBRARY -o libdolos_native.so secure.c
 
 FROM python:3.13-slim
+# Remediate inherited Python dependency vulnerabilities
+RUN python -m pip install --no-cache-dir \
+    msgpack==1.2.3 \
+    setuptools==84.2.1 \
+    urllib3==2.8.0 \
+    && python -m pip check
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DOLOS_HOST=0.0.0.0 DOLOS_PORT=5000 DOLOS_DB=/app/instance/dolos.sqlite3
 WORKDIR /app
 RUN groupadd --system dolos && useradd --system --gid dolos --home /app dolos
