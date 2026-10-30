@@ -1,0 +1,23 @@
+services:
+  dolos:
+    build: .
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - dolos_data:/app/instance
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    environment:
+      DOLOS_HOST: 0.0.0.0
+      DOLOS_PORT: "5000"
+      DOLOS_COOKIE_SECURE: "0" # localhost HTTP only. Set 1 when behind TLS termination.
+    restart: unless-stopped
+volumes:
+  dolos_data:
