@@ -1,5 +1,7 @@
 """Simple HTML rendering; escape every attacker-controlled field."""
 from .security import esc
+import base64
+import hashlib
 CSS = '''
 :root{color-scheme:dark}body{margin:0;background:#0b111b;color:#e8eef6;font:16px system-ui,sans-serif}
 header{padding:24px 6%;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #253143}
@@ -12,8 +14,12 @@ input,button{font:inherit;border-radius:7px;padding:11px;margin:6px 0}input{back
 button{background:#eb566c;border:0;color:#fff;cursor:pointer;font-weight:bold}button:hover{background:#f77384}
 .error{color:#ff9ea9}.ok{color:#94e2b8}table{width:100%;border-collapse:collapse}td,th{padding:12px;border-bottom:1px solid #2a3b4c;text-align:left}
 code{background:#263245;padding:4px 8px;border-radius:5px;overflow-wrap:anywhere}
+.inline-form{display:inline}
 '''
 
+# A hash authorizes only this exact inline stylesheet, not arbitrary inline CSS.
+CSS_SHA256 = base64.b64encode(hashlib.sha256(CSS.encode('utf-8')).digest()).decode('ascii')
+
 def layout(title, content, user=None):
-    nav = f'<span>{esc(user["username"])} ({esc(user["role"])}) <form style="display:inline" action="/logout" method="post"><input type="hidden" name="csrf" value="{esc(user["csrf"])}"><button>Log out</button></form></span>' if user else '<a href="/login">Sign in</a>'
+    nav = f'<span>{esc(user["username"])} ({esc(user["role"])}) <form class="inline-form" action="/logout" method="post"><input type="hidden" name="csrf" value="{esc(user["csrf"])}"><button>Log out</button></form></span>' if user else '<a href="/login">Sign in</a>'
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)} | DOLOS</title><style>{CSS}</style></head><body><header><span class="brand">DOLOS</span>{nav}</header><main><div class="kicker">Deception Operations and Log Observation System</div>{content}</main></body></html>'''

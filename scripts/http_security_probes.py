@@ -6,6 +6,7 @@ change the user's actual DOLOS database, accounts, or running application.
 """
 import http.client
 import io
+import re
 import tempfile
 import threading
 from pathlib import Path
@@ -26,6 +27,14 @@ class Session:
         self.port = port
         self.cookie = None
 
+    def login(self, username, password):
+        status, _, body = self.request('GET', '/login')
+        assert status == 200
+        token = re.search(r'name="csrf" value="([^"]+)"', body)
+        assert token, 'Missing pre-login CSRF token'
+        return self.request('POST', '/login',
+            {'username': username, 'password': password, 'csrf': token.group(1)})
+
     def request(self, method, path, data=None):
         headers = {}
         payload = None
@@ -40,7 +49,7 @@ class Session:
             response = conn.getresponse()
             body = response.read().decode('utf-8', errors='replace')
             response_headers = dict(response.getheaders())
-            if 'Set-Cookie' in response_headers and 'dolos_session=' in response_headers['Set-Cookie']:
+            if 'Set-Cookie' in response_headers:
                 self.cookie = response_headers['Set-Cookie'].split(';', 1)[0]
             return response.status, response_headers, body
         finally:
@@ -67,9 +76,13 @@ def verify():
         try:
             port = server.server_port
             alice = Session(port)
-            status, headers, _ = alice.request('POST', '/login',
-                {'username': 'alice', 'password': 'AlicePassword-test-2026'})
+            status, headers, _ = alice.login('alice', 'AlicePassword-test-2026')
             assert status == 303, f'Alice login status {status}'
+            anonymous = Session(port)
+            bad_status, _, _ = anonymous.request('POST', '/login',
+                {'username': 'alice', 'password': 'AlicePassword-test-2026'})
+            assert bad_status == 403, 'Forged login was not rejected'
+            print('[PASS] Login CSRF: forged login without token rejected (HTTP 403)')
             assert 'HttpOnly' in headers['Set-Cookie'] and 'SameSite=Lax' in headers['Set-Cookie']
             with db.connect(path) as con:
                 csrf = con.execute('SELECT csrf FROM sessions WHERE user_id=?',
@@ -112,8 +125,7 @@ def verify():
             assert "frame-ancestors 'none'" in headers.get('Content-Security-Policy', '')
             print('[PASS] Clickjacking: security headers on forbidden admin response (HTTP 403)')
             administrator = Session(port)
-            status, _, _ = administrator.request('POST', '/login',
-                {'username': 'admin', 'password': 'AdminPassword-test-2026'})
+            status, _, _ = administrator.login('admin', 'AdminPassword-test-2026')
             assert status == 303
             status, headers, _ = administrator.request('GET', '/admin')
             assert status == 200 and headers.get('X-Frame-Options') == 'DENY'
@@ -124,7 +136,7 @@ def verify():
             assert status == 200 and '<script>alert(1)</script>' not in body
             assert '&lt;script&gt;' in body
             print('[PASS] Extra XSS control: incident value HTML-escaped')
-            print('DOLOS secure HTTP regression probes: 8/8 PASSED')
+            print('DOLOS secure HTTP regression probes: 9/9 PASSED')
         finally:
             server.shutdown()
             server.server_close()

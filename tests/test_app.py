@@ -1,6 +1,7 @@
 """WSGI integration tests: auth, IDOR, CSRF, clickjacking, injection and decoys."""
 import io
 import os
+import re
 import tempfile
 import unittest
 from urllib.parse import urlencode
@@ -45,7 +46,11 @@ class DolosTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def login(self,who,password):
-        code,headers,body=self.client.req('POST','/login',{'username':who,'password':password})
+        code,_,body=self.client.req('GET','/login')
+        self.assertEqual(code,200)
+        match=re.search(r'name="csrf" value="([^"]+)"',body)
+        self.assertIsNotNone(match)
+        code,headers,body=self.client.req('POST','/login',{'username':who,'password':password,'csrf':match.group(1)})
         self.assertEqual(code,303)
         self.assertIn('HttpOnly',headers['Set-Cookie'])
         self.assertIn('SameSite=Lax',headers['Set-Cookie'])
@@ -58,6 +63,19 @@ class DolosTests(unittest.TestCase):
         self.assertIn('"status": "ok"',body)
         self.assertEqual(headers['X-Frame-Options'],'DENY')
         self.assertIn("frame-ancestors 'none'",headers['Content-Security-Policy'])
+        self.assertNotIn("'unsafe-inline'", headers['Content-Security-Policy'])
+        self.assertIn("'sha256-", headers['Content-Security-Policy'])
+
+    def test_prelogin_csrf_rejects_forgery(self):
+        code,_,body=self.client.req('GET','/login')
+        self.assertEqual(code,200)
+        self.assertIn('name="csrf"', body)
+        creds={'username':'alice','password':'AlicePassword-test-2026'}
+        self.assertEqual(self.client.req('POST','/login',creds)[0],403)
+        self.assertEqual(self.client.req('POST','/login',{**creds,'csrf':'0'*64})[0],403)
+        with db.connect(self.path) as con:
+            self.assertEqual(con.execute('SELECT COUNT(*) FROM sessions').fetchone()[0],0)
+        self.login('alice','AlicePassword-test-2026')
 
     def test_auth_required(self):
         self.assertEqual(self.client.req('GET','/events/1')[0],401)
