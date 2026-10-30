@@ -1,0 +1,2 @@
+<!doctype html><html><head><meta charset="utf-8"><title>DOLOS iframe proof</title></head>
+<body><h2>DOLOS local clickjacking proof</h2><p>Start both services. Frame #1 should display the vulnerable admin page. Frame #2 must be blocked by the secure service's CSP/X-Frame-Options policy.</p><h3>Unsafe demo (127.0.0.1:5001)</h3><iframe width="600" height="200" src="http://127.0.0.1:5001/lab/admin"></iframe><h3>Secured response (127.0.0.1:5000)</h3><iframe width="600" height="200" src="http://127.0.0.1:5000/admin"></iframe></body></html>
